@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>MNIST Digit Recognizer — ANN (Flask)</title>
+<style>
+  :root{--bg:#0b1020;--panel:#121933;--ink:#e8ecff;--muted:#9aa3c7;
+        --accent:#7c9cff;--accent2:#22d3ee;--good:#34d399;--bar:#2a3360;}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:ui-sans-serif,system-ui,sans-serif;
+       background:radial-gradient(1200px 600px at 20% -10%,#1a2350 0%,transparent 60%),var(--bg);
+       color:var(--ink);min-height:100vh}
+  header{padding:28px 24px;text-align:center}
+  header h1{margin:0;font-size:28px}
+  header p{margin:6px 0 0;color:var(--muted);font-size:14px}
+  .wrap{max-width:920px;margin:0 auto;padding:8px 20px 60px;display:grid;
+        grid-template-columns:1fr 1fr;gap:24px}
+  @media(max-width:760px){.wrap{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid #1f2a55;border-radius:16px;padding:20px;
+        box-shadow:0 10px 30px rgba(0,0,0,.35)}
+  h2{margin:0 0 12px;font-size:16px;color:var(--muted);font-weight:600;
+     letter-spacing:.4px;text-transform:uppercase}
+  .canvas-box{display:flex;justify-content:center}
+  canvas#pad{background:#000;border-radius:12px;touch-action:none;cursor:crosshair;
+             width:280px;height:280px;display:block}
+  .row{display:flex;gap:10px;margin-top:14px;flex-wrap:wrap;justify-content:center}
+  button{background:linear-gradient(180deg,var(--accent),#5b7cf0);color:white;border:0;
+         padding:10px 16px;border-radius:10px;font-weight:600;cursor:pointer;
+         box-shadow:0 6px 16px rgba(124,156,255,.35)}
+  button.secondary{background:#1c2550;box-shadow:none;border:1px solid #2a3677;color:var(--ink)}
+  .pred{font-size:84px;font-weight:800;text-align:center;line-height:1;
+        background:linear-gradient(180deg,var(--accent2),var(--accent));
+        -webkit-background-clip:text;background-clip:text;color:transparent;min-height:90px}
+  .conf{text-align:center;color:var(--muted);margin-top:4px;font-size:14px;min-height:18px}
+  .bars{margin-top:18px;display:grid;grid-template-columns:24px 1fr 48px;row-gap:6px;
+        column-gap:10px;align-items:center}
+  .lbl{font-variant-numeric:tabular-nums;color:var(--muted);text-align:right}
+  .bar{height:10px;background:var(--bar);border-radius:6px;overflow:hidden}
+  .bar > i{display:block;height:100%;width:0%;
+           background:linear-gradient(90deg,var(--accent),var(--accent2));transition:width .2s}
+  .pct{font-variant-numeric:tabular-nums;color:var(--muted);font-size:12px}
+  .status{font-size:12px;color:var(--muted);text-align:center;margin-top:10px}
+  .top{color:var(--good)!important;font-weight:700}
+  footer{text-align:center;color:var(--muted);font-size:12px;padding:0 16px 24px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Handwritten Digit Recognizer</h1>
+  <p>MNIST · ANN · Flask backend</p>
+</header>
+<div class="wrap">
+  <section class="card">
+    <h2>Draw a digit (0–9)</h2>
+    <div class="canvas-box"><canvas id="pad" width="280" height="280"></canvas></div>
+    <div class="row">
+      <button id="predictBtn">Predict</button>
+      <button id="clearBtn" class="secondary">Clear</button>
+    </div>
+    <div id="status" class="status">Backend ready ✓</div>
+  </section>
+  <section class="card">
+    <h2>Prediction</h2>
+    <div id="pred" class="pred">–</div>
+    <div id="conf" class="conf">Draw a digit and hit Predict</div>
+    <div id="bars" class="bars"></div>
+  </section>
+</div>
+<footer>POST /api/predict · MNIST dataset</footer>
+<script>
+const pad=document.getElementById('pad'),ctx=pad.getContext('2d');
+const predictBtn=document.getElementById('predictBtn'),clearBtn=document.getElementById('clearBtn');
+const statusEl=document.getElementById('status'),predEl=document.getElementById('pred');
+const confEl=document.getElementById('conf'),barsEl=document.getElementById('bars');
+ctx.fillStyle='#000';ctx.fillRect(0,0,pad.width,pad.height);
+ctx.strokeStyle='#fff';ctx.lineCap='round';ctx.lineJoin='round';ctx.lineWidth=20;
+let drawing=false,last=null,hasInk=false;
+function pos(e){const r=pad.getBoundingClientRect();const t=e.touches?e.touches[0]:e;
+  return{x:(t.clientX-r.left)*(pad.width/r.width),y:(t.clientY-r.top)*(pad.height/r.height)};}
+function start(e){e.preventDefault();drawing=true;last=pos(e);}
+function move(e){if(!drawing)return;e.preventDefault();const p=pos(e);
+  ctx.beginPath();ctx.moveTo(last.x,last.y);ctx.lineTo(p.x,p.y);ctx.stroke();last=p;hasInk=true;}
+function end(){drawing=false;last=null;}
+['mousedown','touchstart'].forEach(ev=>pad.addEventListener(ev,start));
+['mousemove','touchmove'].forEach(ev=>pad.addEventListener(ev,move,{passive:false}));
+['mouseup','mouseleave','touchend','touchcancel'].forEach(ev=>pad.addEventListener(ev,end));
+function renderBars(probs,top){barsEl.innerHTML='';
+  for(let i=0;i<10;i++){
+    const lbl=document.createElement('div');lbl.className='lbl'+(i===top?' top':'');lbl.textContent=i;
+    const bar=document.createElement('div');bar.className='bar';
+    const fill=document.createElement('i');fill.style.width=(probs[i]*100).toFixed(1)+'%';bar.appendChild(fill);
+    const pct=document.createElement('div');pct.className='pct'+(i===top?' top':'');
+    pct.textContent=(probs[i]*100).toFixed(1)+'%';
+    barsEl.append(lbl,bar,pct);
+  }
+}
+renderBars(new Array(10).fill(0),-1);
+clearBtn.onclick=()=>{ctx.fillStyle='#000';ctx.fillRect(0,0,pad.width,pad.height);
+  hasInk=false;predEl.textContent='–';confEl.textContent='Draw a digit and hit Predict';
+  renderBars(new Array(10).fill(0),-1);};
+predictBtn.onclick=async()=>{
+  if(!hasInk){confEl.textContent='Draw something first.';return;}
+  statusEl.textContent='Predicting…';
+  try{
+    const dataUrl=pad.toDataURL('image/png');
+    const r=await fetch('/api/predict',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({image:dataUrl})});
+    const j=await r.json();
+    predEl.textContent=j.prediction;
+    confEl.textContent=`Confidence: ${(j.confidence*100).toFixed(2)}%`;
+    renderBars(j.probabilities,j.prediction);
+    statusEl.textContent='Backend ready ✓';
+  }catch(e){statusEl.textContent='Request failed: '+e.message;}
+};
+</script>
+</body>
+</html>
